@@ -50,11 +50,24 @@
         .hint { color: #666; font-size: 0.85em; margin-top: 6px; }
         .label-good { color: #1a7f37; font-weight: bold; }
         .label-bad { color: #b42318; font-weight: bold; }
-        .toolbar { margin-bottom: 10px; }
+
+        .toolbar { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .filter-bar { background: #fff; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+        .filter-bar .field { display: flex; flex-direction: column; gap: 4px; }
+        .filter-bar label { font-size: 0.85em; color: #666; }
+        .nav-links { display: flex; gap: 12px; margin-bottom: 16px; }
+        .nav-links a { color: #3498db; text-decoration: none; font-size: 0.9em; }
+        .nav-links a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <h1>メモリー廃棄管理システム</h1>
+
+    <div class="nav-links">
+        <a href="{{ url_for('index') }}">ダッシュボード</a>
+        <a href="{{ url_for('audit_log') }}">監査ログ</a>
+        <a href="{{ url_for('export_csv') }}">CSVエクスポート</a>
+    </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
@@ -62,14 +75,19 @@
     {% endfor %}
     {% endwith %}
 
-    {# --- サマリー --- #}
-    {% set total_cost = items | selectattr('cost') | map(attribute='cost') | sum %}
-    {% set total_benefit = items | selectattr('expected_benefit') | map(attribute='expected_benefit') | sum %}
-    {% set total_net = items | selectattr('net_effect') | map(attribute='net_effect') | sum %}
+    {# --- サマリー (全件ベース) --- #}
+    {% set total_cost = all_items | selectattr('cost') | map(attribute='cost') | sum %}
+    {% set total_benefit = all_items | selectattr('expected_benefit') | map(attribute='expected_benefit') | sum %}
+    {% set total_net = all_items | selectattr('net_effect') | map(attribute='net_effect') | sum %}
+    {% set total_quantity = all_items | map(attribute='quantity') | sum %}
     <div class="summary">
         <div class="stat">
-            <div class="num">{{ items | length }}</div>
+            <div class="num">{{ all_items | length }}</div>
             <div class="label">総アイテム数</div>
+        </div>
+        <div class="stat">
+            <div class="num">{{ "{:,}".format(total_quantity) }}</div>
+            <div class="label">総数量</div>
         </div>
         <div class="stat">
             <div class="num">&yen;{{ "{:,}".format(total_cost) }}</div>
@@ -84,15 +102,19 @@
             <div class="label">純効果(期待効果-コスト)</div>
         </div>
         <div class="stat">
-            <div class="num">{{ items | selectattr('status', 'equalto', 'approved') | list | length }}</div>
+            <div class="num">{{ all_items | selectattr('status', 'equalto', 'pending') | list | length }}</div>
+            <div class="label">未承認</div>
+        </div>
+        <div class="stat">
+            <div class="num">{{ all_items | selectattr('status', 'equalto', 'approved') | list | length }}</div>
             <div class="label">承認済み</div>
         </div>
         <div class="stat">
-            <div class="num">{{ items | selectattr('risk_score', 'equalto', 3) | list | length }}</div>
+            <div class="num">{{ all_items | selectattr('risk_score', 'equalto', 3) | list | length }}</div>
             <div class="label">高リスク案件</div>
         </div>
         <div class="stat">
-            <div class="num">{{ items | selectattr('status', 'equalto', 'executed') | list | length }}</div>
+            <div class="num">{{ all_items | selectattr('status', 'equalto', 'executed') | list | length }}</div>
             <div class="label">廃棄済み</div>
         </div>
     </div>
@@ -102,27 +124,61 @@
     <form class="add-form" method="POST" action="{{ url_for('add_item') }}">
         <div class="field">
             <label for="name">アイテム名</label>
-            <input type="text" id="name" name="name" required placeholder="例: DDR4 8GB">
+            <input type="text" id="name" name="name" required placeholder="例: DDR4 8GB" maxlength="200">
         </div>
         <div class="field">
             <label for="quantity">数量</label>
-            <input type="number" id="quantity" name="quantity" value="1" min="1" style="width:80px;">
+            <input type="number" id="quantity" name="quantity" value="1" min="1" max="1000000" style="width:100px;">
         </div>
         <div class="field">
             <label for="facility_age">設備年数</label>
-            <input type="number" id="facility_age" name="facility_age" value="0" min="0" style="width:100px;">
+            <input type="number" id="facility_age" name="facility_age" value="0" min="0" max="100" style="width:100px;">
         </div>
         <button type="submit">追加</button>
     </form>
     <p class="hint">設備年数20年以上は「生産削減」を推奨、数量が大きい案件は「リサイクル/援助転用」を優先します。</p>
 
-    {# --- 在庫リスト --- #}
+    {# --- 検索・フィルター --- #}
     <h2>廃棄対象在庫リスト</h2>
+    <form class="filter-bar" method="GET" action="{{ url_for('index') }}">
+        <div class="field">
+            <label for="q">検索</label>
+            <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="アイテム名で検索">
+        </div>
+        <div class="field">
+            <label for="status">ステータス</label>
+            <select id="status" name="status">
+                <option value="">すべて</option>
+                <option value="pending" {{ 'selected' if status_filter == 'pending' }}>未承認</option>
+                <option value="approved" {{ 'selected' if status_filter == 'approved' }}>承認済</option>
+                <option value="rejected" {{ 'selected' if status_filter == 'rejected' }}>却下</option>
+                <option value="executed" {{ 'selected' if status_filter == 'executed' }}>廃棄済</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="method">廃棄方法</label>
+            <select id="method" name="method">
+                <option value="">すべて</option>
+                {% for key, m in methods.items() %}
+                <option value="{{ key }}" {{ 'selected' if method_filter == key }}>{{ m.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit">絞り込み</button>
+        {% if search_query or status_filter or method_filter %}
+        <a href="{{ url_for('index') }}" style="color: #e74c3c; font-size: 0.85em; text-decoration: none;">クリア</a>
+        {% endif %}
+    </form>
+
     <div class="toolbar">
         <form method="POST" action="{{ url_for('auto_plan') }}">
             <button type="submit" class="secondary">未設定アイテムへ推奨方法を一括適用</button>
         </form>
+        {% if search_query or status_filter or method_filter %}
+        <span style="color: #888; font-size: 0.85em;">{{ items | length }}件表示中 / 全{{ all_items | length }}件</span>
+        {% endif %}
     </div>
+
     {% if items %}
     <table>
         <thead>
@@ -147,7 +203,7 @@
             <tr>
                 <td>{{ item.id }}</td>
                 <td>{{ item.name }}</td>
-                <td>{{ item.quantity }}</td>
+                <td>{{ "{:,}".format(item.quantity) }}</td>
                 <td>{{ item.facility_age }}年</td>
                 <td>{{ methods[recommendations[item.id]].label }}</td>
                 <td>
@@ -160,7 +216,7 @@
                                 <option value="{{ key }}">{{ m.label }} (&yen;{{ m.cost_per_unit }}/個)</option>
                                 {% endfor %}
                             </select>
-                            <input type="text" name="mitigation_note" placeholder="リスク対策メモ(任意)" style="min-width:160px;">
+                            <input type="text" name="mitigation_note" placeholder="リスク対策メモ(任意)" maxlength="500" style="min-width:160px;">
                             <button type="submit" style="font-size:0.8em;">選択</button>
                         </form>
                     {% endif %}
@@ -203,7 +259,12 @@
                             <button type="submit" style="font-size:0.8em;">廃棄実行</button>
                         </form>
                         {% endif %}
-                        <form method="POST" action="{{ url_for('delete_item', item_id=item.id) }}">
+                        {% if item.status == 'rejected' %}
+                        <form method="POST" action="{{ url_for('reset_item', item_id=item.id) }}">
+                            <button type="submit" class="secondary" style="font-size:0.8em;">リセット</button>
+                        </form>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('delete_item', item_id=item.id) }}" onsubmit="return confirm('「{{ item.name }}」を削除しますか？この操作は取り消せません。');">
                             <button type="submit" class="danger" style="font-size:0.8em;">削除</button>
                         </form>
                     </div>
@@ -213,7 +274,13 @@
         </tbody>
     </table>
     {% else %}
-    <p style="color:#888; margin-top:8px;">廃棄対象のアイテムはありません。</p>
+    <p style="color:#888; margin-top:8px;">
+        {% if search_query or status_filter or method_filter %}
+            条件に一致するアイテムはありません。<a href="{{ url_for('index') }}">フィルターをクリア</a>
+        {% else %}
+            廃棄対象のアイテムはありません。
+        {% endif %}
+    </p>
     {% endif %}
 </body>
 </html>
