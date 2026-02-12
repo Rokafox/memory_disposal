@@ -6,7 +6,7 @@
     <title>メモリー廃棄管理</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: sans-serif; background: #f5f5f5; color: #333; padding: 20px; max-width: 960px; margin: 0 auto; }
+        body { font-family: sans-serif; background: #f5f5f5; color: #333; padding: 20px; max-width: 1280px; margin: 0 auto; }
         h1 { margin-bottom: 20px; color: #2c3e50; }
         h2 { margin: 24px 0 12px; color: #34495e; font-size: 1.1em; }
 
@@ -27,6 +27,8 @@
         button.approve:hover { background: #219a52; }
         button.warn { background: #f39c12; }
         button.warn:hover { background: #d68910; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #5c636a; }
 
         table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; }
         th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9em; }
@@ -45,6 +47,10 @@
         .summary .stat { text-align: center; }
         .summary .stat .num { font-size: 1.5em; font-weight: bold; color: #2c3e50; }
         .summary .stat .label { font-size: 0.8em; color: #888; }
+        .hint { color: #666; font-size: 0.85em; margin-top: 6px; }
+        .label-good { color: #1a7f37; font-weight: bold; }
+        .label-bad { color: #b42318; font-weight: bold; }
+        .toolbar { margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -58,6 +64,8 @@
 
     {# --- サマリー --- #}
     {% set total_cost = items | selectattr('cost') | map(attribute='cost') | sum %}
+    {% set total_benefit = items | selectattr('expected_benefit') | map(attribute='expected_benefit') | sum %}
+    {% set total_net = items | selectattr('net_effect') | map(attribute='net_effect') | sum %}
     <div class="summary">
         <div class="stat">
             <div class="num">{{ items | length }}</div>
@@ -68,8 +76,20 @@
             <div class="label">総廃棄コスト</div>
         </div>
         <div class="stat">
+            <div class="num">&yen;{{ "{:,}".format(total_benefit) }}</div>
+            <div class="label">総期待効果</div>
+        </div>
+        <div class="stat">
+            <div class="num {% if total_net >= 0 %}label-good{% else %}label-bad{% endif %}">&yen;{{ "{:,}".format(total_net) }}</div>
+            <div class="label">純効果(期待効果-コスト)</div>
+        </div>
+        <div class="stat">
             <div class="num">{{ items | selectattr('status', 'equalto', 'approved') | list | length }}</div>
             <div class="label">承認済み</div>
+        </div>
+        <div class="stat">
+            <div class="num">{{ items | selectattr('risk_score', 'equalto', 3) | list | length }}</div>
+            <div class="label">高リスク案件</div>
         </div>
         <div class="stat">
             <div class="num">{{ items | selectattr('status', 'equalto', 'executed') | list | length }}</div>
@@ -88,11 +108,21 @@
             <label for="quantity">数量</label>
             <input type="number" id="quantity" name="quantity" value="1" min="1" style="width:80px;">
         </div>
+        <div class="field">
+            <label for="facility_age">設備年数</label>
+            <input type="number" id="facility_age" name="facility_age" value="0" min="0" style="width:100px;">
+        </div>
         <button type="submit">追加</button>
     </form>
+    <p class="hint">設備年数20年以上は「生産削減」を推奨、数量が大きい案件は「リサイクル/援助転用」を優先します。</p>
 
     {# --- 在庫リスト --- #}
     <h2>廃棄対象在庫リスト</h2>
+    <div class="toolbar">
+        <form method="POST" action="{{ url_for('auto_plan') }}">
+            <button type="submit" class="secondary">未設定アイテムへ推奨方法を一括適用</button>
+        </form>
+    </div>
     {% if items %}
     <table>
         <thead>
@@ -100,9 +130,14 @@
                 <th>ID</th>
                 <th>アイテム名</th>
                 <th>数量</th>
+                <th>設備年数</th>
+                <th>推奨</th>
                 <th>廃棄方法</th>
                 <th>コスト</th>
                 <th>環境影響</th>
+                <th>リスク</th>
+                <th>期待効果</th>
+                <th>純効果</th>
                 <th>ステータス</th>
                 <th>操作</th>
             </tr>
@@ -113,16 +148,19 @@
                 <td>{{ item.id }}</td>
                 <td>{{ item.name }}</td>
                 <td>{{ item.quantity }}</td>
+                <td>{{ item.facility_age }}年</td>
+                <td>{{ methods[recommendations[item.id]].label }}</td>
                 <td>
                     {% if item.disposal_method %}
                         {{ methods[item.disposal_method].label }}
                     {% else %}
-                        <form method="POST" action="{{ url_for('select_method', item_id=item.id) }}" style="display:flex;gap:4px;">
+                        <form method="POST" action="{{ url_for('select_method', item_id=item.id) }}" style="display:flex;gap:4px;flex-wrap:wrap;">
                             <select name="method">
                                 {% for key, m in methods.items() %}
                                 <option value="{{ key }}">{{ m.label }} (&yen;{{ m.cost_per_unit }}/個)</option>
                                 {% endfor %}
                             </select>
+                            <input type="text" name="mitigation_note" placeholder="リスク対策メモ(任意)" style="min-width:160px;">
                             <button type="submit" style="font-size:0.8em;">選択</button>
                         </form>
                     {% endif %}
@@ -132,6 +170,11 @@
                     {% if item.disposal_method %}
                         <span>{{ env_labels[item.env_score] }}</span>
                     {% else %}-{% endif %}
+                </td>
+                <td>{% if item.disposal_method %}{{ risk_labels[item.risk_score] }}{% else %}-{% endif %}</td>
+                <td>{% if item.expected_benefit %}&yen;{{ "{:,}".format(item.expected_benefit) }}{% else %}-{% endif %}</td>
+                <td class="{% if item.net_effect >= 0 %}label-good{% else %}label-bad{% endif %}">
+                    {% if item.disposal_method %}&yen;{{ "{:,}".format(item.net_effect) }}{% else %}-{% endif %}
                 </td>
                 <td><span class="status {{ item.status }}">
                     {% if item.status == 'pending' %}未承認
@@ -148,6 +191,11 @@
                         </form>
                         <form method="POST" action="{{ url_for('reject', item_id=item.id) }}">
                             <button type="submit" class="warn" style="font-size:0.8em;">却下</button>
+                        </form>
+                        {% endif %}
+                        {% if not item.disposal_method %}
+                        <form method="POST" action="{{ url_for('apply_recommendation', item_id=item.id) }}">
+                            <button type="submit" class="secondary" style="font-size:0.8em;">推奨適用</button>
                         </form>
                         {% endif %}
                         {% if item.status == 'approved' %}
