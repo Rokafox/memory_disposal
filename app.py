@@ -10,9 +10,8 @@ DATABASE = "memory_disposal.db"
 
 # 廃棄方法ごとのコスト（円/個）と環境スコア（低いほど良い）
 DISPOSAL_METHODS = {
-    "physical": {"label": "物理破壊", "cost_per_unit": 500, "env_score": 3},
-    "recycle": {"label": "リサイクル", "cost_per_unit": 300, "env_score": 1},
-    "donate": {"label": "援助", "cost_per_unit": 100, "env_score": 0},
+    "physical": {"label": "物理破壊", "cost_per_unit": 100, "env_score": 3},
+    "recycle": {"label": "リサイクル", "cost_per_unit": 30000, "env_score": 1},
 }
 
 ENV_LABELS = {0: "影響なし", 1: "低", 2: "中", 3: "高"}
