@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>監査ログ - メモリー廃棄管理</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f5f5f5; color: #333; padding: 20px; max-width: 1280px; margin: 0 auto; }
+        h1 { margin-bottom: 20px; color: #2c3e50; }
+
+        .flash { padding: 10px 16px; border-radius: 4px; margin-bottom: 12px; }
+        .flash.error { background: #f8d7da; color: #721c24; }
+
+        .nav-links { display: flex; gap: 12px; margin-bottom: 16px; }
+        .nav-links a { color: #3498db; text-decoration: none; font-size: 0.9em; }
+        .nav-links a:hover { text-decoration: underline; }
+
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        th { background: #2c3e50; color: #fff; }
+
+        .action-badge { padding: 3px 8px; border-radius: 10px; font-size: 0.8em; font-weight: bold; }
+        .action-badge.add { background: #d4edda; color: #155724; }
+        .action-badge.delete { background: #f8d7da; color: #721c24; }
+        .action-badge.approve { background: #a3e4a1; color: #1a5c18; }
+        .action-badge.reject { background: #fab1a0; color: #6b1a0a; }
+        .action-badge.execute { background: #74b9ff; color: #0a3d6b; }
+        .action-badge.other { background: #e2e3e5; color: #383d41; }
+    </style>
+</head>
+<body>
+    <h1>監査ログ</h1>
+
+    <div class="nav-links">
+        <a href="{{ url_for('index') }}">ダッシュボードに戻る</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endwith %}
+
+    {% if logs %}
+    <table>
+        <thead>
+            <tr>
+                <th>日時</th>
+                <th>操作</th>
+                <th>アイテムID</th>
+                <th>アイテム名</th>
+                <th>詳細</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log.created_at }}</td>
+                <td>
+                    {% if log.action == '追加' %}
+                    <span class="action-badge add">{{ log.action }}</span>
+                    {% elif log.action == '削除' %}
+                    <span class="action-badge delete">{{ log.action }}</span>
+                    {% elif log.action == '承認' %}
+                    <span class="action-badge approve">{{ log.action }}</span>
+                    {% elif log.action == '却下' %}
+                    <span class="action-badge reject">{{ log.action }}</span>
+                    {% elif log.action == '廃棄実行' %}
+                    <span class="action-badge execute">{{ log.action }}</span>
+                    {% else %}
+                    <span class="action-badge other">{{ log.action }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ log.item_id if log.item_id else '-' }}</td>
+                <td>{{ log.item_name if log.item_name else '-' }}</td>
+                <td>{{ log.detail if log.detail else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#888; margin-top:8px;">監査ログはまだありません。</p>
+    {% endif %}
+</body>
+</html>
