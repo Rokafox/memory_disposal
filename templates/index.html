@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>メモリー廃棄管理</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f5f5f5; color: #333; padding: 20px; max-width: 960px; margin: 0 auto; }
+        h1 { margin-bottom: 20px; color: #2c3e50; }
+        h2 { margin: 24px 0 12px; color: #34495e; font-size: 1.1em; }
+
+        .flash { padding: 10px 16px; border-radius: 4px; margin-bottom: 12px; }
+        .flash.success { background: #d4edda; color: #155724; }
+        .flash.error { background: #f8d7da; color: #721c24; }
+        .flash.info { background: #d1ecf1; color: #0c5460; }
+
+        .add-form { background: #fff; padding: 16px; border-radius: 6px; margin-bottom: 20px; display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+        .add-form label { font-size: 0.85em; color: #666; }
+        .add-form .field { display: flex; flex-direction: column; gap: 4px; }
+        input, select, button { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95em; }
+        button { background: #3498db; color: #fff; border: none; cursor: pointer; white-space: nowrap; }
+        button:hover { background: #2980b9; }
+        button.danger { background: #e74c3c; }
+        button.danger:hover { background: #c0392b; }
+        button.approve { background: #27ae60; }
+        button.approve:hover { background: #219a52; }
+        button.warn { background: #f39c12; }
+        button.warn:hover { background: #d68910; }
+
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        th { background: #2c3e50; color: #fff; }
+
+        .status { padding: 3px 8px; border-radius: 10px; font-size: 0.8em; font-weight: bold; }
+        .status.pending { background: #ffeaa7; color: #6c5c00; }
+        .status.approved { background: #a3e4a1; color: #1a5c18; }
+        .status.rejected { background: #fab1a0; color: #6b1a0a; }
+        .status.executed { background: #74b9ff; color: #0a3d6b; }
+
+        .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+        .actions form { display: inline; }
+
+        .summary { background: #fff; padding: 16px; border-radius: 6px; margin-bottom: 20px; display: flex; gap: 24px; flex-wrap: wrap; }
+        .summary .stat { text-align: center; }
+        .summary .stat .num { font-size: 1.5em; font-weight: bold; color: #2c3e50; }
+        .summary .stat .label { font-size: 0.8em; color: #888; }
+    </style>
+</head>
+<body>
+    <h1>メモリー廃棄管理システム</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endwith %}
+
+    {# --- サマリー --- #}
+    {% set total_cost = items | selectattr('cost') | map(attribute='cost') | sum %}
+    <div class="summary">
+        <div class="stat">
+            <div class="num">{{ items | length }}</div>
+            <div class="label">総アイテム数</div>
+        </div>
+        <div class="stat">
+            <div class="num">&yen;{{ "{:,}".format(total_cost) }}</div>
+            <div class="label">総廃棄コスト</div>
+        </div>
+        <div class="stat">
+            <div class="num">{{ items | selectattr('status', 'equalto', 'approved') | list | length }}</div>
+            <div class="label">承認済み</div>
+        </div>
+        <div class="stat">
+            <div class="num">{{ items | selectattr('status', 'equalto', 'executed') | list | length }}</div>
+            <div class="label">廃棄済み</div>
+        </div>
+    </div>
+
+    {# --- アイテム追加フォーム --- #}
+    <h2>廃棄対象アイテムを追加</h2>
+    <form class="add-form" method="POST" action="{{ url_for('add_item') }}">
+        <div class="field">
+            <label for="name">アイテム名</label>
+            <input type="text" id="name" name="name" required placeholder="例: DDR4 8GB">
+        </div>
+        <div class="field">
+            <label for="quantity">数量</label>
+            <input type="number" id="quantity" name="quantity" value="1" min="1" style="width:80px;">
+        </div>
+        <button type="submit">追加</button>
+    </form>
+
+    {# --- 在庫リスト --- #}
+    <h2>廃棄対象在庫リスト</h2>
+    {% if items %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>アイテム名</th>
+                <th>数量</th>
+                <th>廃棄方法</th>
+                <th>コスト</th>
+                <th>環境影響</th>
+                <th>ステータス</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.id }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>
+                    {% if item.disposal_method %}
+                        {{ methods[item.disposal_method].label }}
+                    {% else %}
+                        <form method="POST" action="{{ url_for('select_method', item_id=item.id) }}" style="display:flex;gap:4px;">
+                            <select name="method">
+                                {% for key, m in methods.items() %}
+                                <option value="{{ key }}">{{ m.label }} (&yen;{{ m.cost_per_unit }}/個)</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" style="font-size:0.8em;">選択</button>
+                        </form>
+                    {% endif %}
+                </td>
+                <td>{% if item.cost %}&yen;{{ "{:,}".format(item.cost) }}{% else %}-{% endif %}</td>
+                <td>
+                    {% if item.disposal_method %}
+                        <span>{{ env_labels[item.env_score] }}</span>
+                    {% else %}-{% endif %}
+                </td>
+                <td><span class="status {{ item.status }}">
+                    {% if item.status == 'pending' %}未承認
+                    {% elif item.status == 'approved' %}承認済
+                    {% elif item.status == 'rejected' %}却下
+                    {% elif item.status == 'executed' %}廃棄済
+                    {% endif %}
+                </span></td>
+                <td>
+                    <div class="actions">
+                        {% if item.disposal_method and item.status == 'pending' %}
+                        <form method="POST" action="{{ url_for('approve', item_id=item.id) }}">
+                            <button type="submit" class="approve" style="font-size:0.8em;">承認</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('reject', item_id=item.id) }}">
+                            <button type="submit" class="warn" style="font-size:0.8em;">却下</button>
+                        </form>
+                        {% endif %}
+                        {% if item.status == 'approved' %}
+                        <form method="POST" action="{{ url_for('execute_disposal', item_id=item.id) }}">
+                            <button type="submit" style="font-size:0.8em;">廃棄実行</button>
+                        </form>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('delete_item', item_id=item.id) }}">
+                            <button type="submit" class="danger" style="font-size:0.8em;">削除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#888; margin-top:8px;">廃棄対象のアイテムはありません。</p>
+    {% endif %}
+</body>
+</html>
